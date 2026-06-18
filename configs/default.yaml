@@ -1,0 +1,53 @@
+# Default CLIP Training Configuration
+
+experiment:
+  name: clip_experiment
+  description: "Default CLIP training experiment"
+  seed: 42
+  device: auto
+  mixed_precision: true
+  distributed: false
+  world_size: 1
+
+model:
+  name: ViT-B-32
+  pretrained: true
+  freeze_image_encoder: false
+  freeze_text_encoder: false
+  checkpoint_path: null
+
+data:
+  dataset_path: data
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  image_size: 224
+  train_split: train
+  val_split: val
+  test_split: test
+
+training:
+  epochs: 10
+  learning_rate: 1.0e-05
+  weight_decay: 0.01
+  warmup_epochs: 2
+  gradient_clip: 1.0
+  accumulation_steps: 1
+  log_interval: 10
+  eval_interval: 1
+  save_interval: 1
+  early_stopping_patience: 5
+  optimizer: adamw
+  scheduler: cosine
+
+evaluation:
+  batch_size: 64
+  num_workers: 4
+  metrics:
+    - recall@1
+    - recall@5
+    - recall@10
+    - precision@1
+    - precision@5
+    - mrr
+    - mean_rank
