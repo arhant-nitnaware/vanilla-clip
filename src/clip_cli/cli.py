@@ -1,6 +1,11 @@
 """
 Main CLI for Research-grade CLIP Framework
 """
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API"
+)
 
 import argparse
 import sys
