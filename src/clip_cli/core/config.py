@@ -49,6 +49,7 @@ class TrainingConfig:
     early_stopping_patience: int = 5
     optimizer: str = "adamw"
     scheduler: str = "cosine"
+    mixed_precision: bool = True
 
 
 @dataclass
@@ -116,6 +117,11 @@ class ConfigManager:
     
     def _dict_to_config(self, config_dict: Dict[str, Any]) -> ExperimentConfig:
         """Convert dictionary to ExperimentConfig"""
+        # Handle nested experiment section
+        if 'experiment' in config_dict and isinstance(config_dict['experiment'], dict):
+            experiment_dict = config_dict.pop('experiment')
+            config_dict.update(experiment_dict)
+        
         # Handle nested configs
         if 'model' in config_dict and isinstance(config_dict['model'], dict):
             config_dict['model'] = ModelConfig(**config_dict['model'])

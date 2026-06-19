@@ -162,8 +162,8 @@ class CLIPTrainer:
         )
         
         for batch_idx, batch in enumerate(progress_bar):
-            images = batch["images"].to(self.device)
-            texts = clip.tokenize(batch["texts"], truncate=True).to(self.device)
+            images = batch["image"].to(self.device)
+            texts = clip.tokenize(batch["text"], truncate=True).to(self.device)
             
             # Forward pass with mixed precision
             if self.scaler:
@@ -265,8 +265,8 @@ class CLIPTrainer:
         progress_bar = tqdm(self.val_loader, desc="Validation")
         
         for batch in progress_bar:
-            images = batch["images"].to(self.device)
-            texts = clip.tokenize(batch["texts"], truncate=True).to(self.device)
+            images = batch["image"].to(self.device)
+            texts = clip.tokenize(batch["text"], truncate=True).to(self.device)
             
             image_features = self.model.encode_image(images)
             text_features = self.model.encode_text(texts)

@@ -23,11 +23,24 @@ class CLIPEvaluator:
         val_loader: DataLoader,
         logger: Optional[ExperimentLogger] = None,
         device: str = "auto",
+        use_all_captions: bool = True,
     ):
+        """
+        Initialize CLIP evaluator
+        
+        Args:
+            model: CLIP model to evaluate
+            val_loader: Validation data loader
+            logger: Optional experiment logger
+            device: Device to use for evaluation
+            use_all_captions: If True, average over all captions when available.
+                           If False, use single caption (sampled or first).
+        """
         self.model = model
         self.val_loader = val_loader
         self.logger = logger
         self.device = self._get_device(device)
+        self.use_all_captions = use_all_captions
         self.model.to(self.device)
     
     def _get_device(self, device: str) -> torch.device:
@@ -53,19 +66,40 @@ class CLIPEvaluator:
         progress_bar = tqdm(self.val_loader, desc="Extracting embeddings")
         
         for batch in progress_bar:
-            images = batch["images"].to(self.device)
-            texts = clip.tokenize(batch["texts"], truncate=True).to(self.device)
+            images = batch["image"].to(self.device)
             
-            # Extract features
+            # Handle multiple captions
+            if self.use_all_captions and "all_texts" in batch:
+                # Average embeddings over all captions
+                all_texts = batch["all_texts"]
+                text_features_batch = []
+                
+                for caption_list in all_texts:
+                    # Tokenize all captions for this batch
+                    caption_features = []
+                    for caption in caption_list:
+                        tokens = clip.tokenize([caption], truncate=True).to(self.device)
+                        feat = self.model.encode_text(tokens)
+                        feat = feat / feat.norm(dim=-1, keepdim=True)
+                        caption_features.append(feat)
+                    
+                    # Average over all captions
+                    avg_feat = torch.stack(caption_features).mean(dim=0)
+                    text_features_batch.append(avg_feat)
+                
+                text_features = torch.cat(text_features_batch, dim=0)
+            else:
+                # Use single caption
+                texts = clip.tokenize(batch["text"], truncate=True).to(self.device)
+                text_features = self.model.encode_text(texts)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            
+            # Extract image features
             img_feat = self.model.encode_image(images)
-            txt_feat = self.model.encode_text(texts)
-            
-            # Normalize
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-            txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
             
             image_features_list.append(img_feat.cpu())
-            text_features_list.append(txt_feat.cpu())
+            text_features_list.append(text_features.cpu())
         
         # Concatenate all features
         image_features = torch.cat(image_features_list, dim=0)

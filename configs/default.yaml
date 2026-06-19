@@ -5,15 +5,14 @@ experiment:
   description: "Default CLIP training experiment"
   seed: 42
   device: auto
-  mixed_precision: true
   distributed: false
   world_size: 1
 
 model:
   name: ViT-B-32
   pretrained: true
-  freeze_image_encoder: false
-  freeze_text_encoder: false
+  freeze_image_encoder: true
+  freeze_text_encoder: true
   checkpoint_path: null
 
 data:
@@ -27,7 +26,7 @@ data:
   test_split: test
 
 training:
-  epochs: 10
+  epochs: 1
   learning_rate: 1.0e-05
   weight_decay: 0.01
   warmup_epochs: 2
@@ -39,6 +38,7 @@ training:
   early_stopping_patience: 5
   optimizer: adamw
   scheduler: cosine
+  mixed_precision: true
 
 evaluation:
   batch_size: 64

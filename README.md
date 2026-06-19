@@ -411,7 +411,57 @@ data/
 
 ### CSV Format
 
-Each CSV file should have `image` and `text` columns:
+Each CSV file should have `image` and `text` columns. The framework now supports **multiple captions per image**:
+
+```csv
+image,text
+images/image1.jpg,A dog running in the park
+images/image1.jpg,A playful canine outdoors
+images/image1.jpg,A brown dog on green grass
+images/image2.jpg,A cat sleeping on a sofa
+images/image2.jpg,A feline resting on furniture
+images/image3.jpg,A bird flying in the sky
+```
+
+**Multi-Caption Support:**
+- Images can appear multiple times with different captions
+- During training, a random caption is sampled for each image per epoch
+- During evaluation, all captions are averaged (configurable)
+- This improves model robustness and leverages diverse descriptions
+
+**Training Behavior:**
+- `sample_caption=True` (default): Randomly samples one caption per image during training
+- This provides data augmentation and prevents overfitting to specific captions
+
+**Evaluation Behavior:**
+- `sample_caption=False` (default): Averages embeddings over all captions for robust evaluation
+- Can be configured to use single caption for faster evaluation
+
+### Using Multi-Caption Datasets
+
+When creating dataloaders, you can control caption sampling:
+
+```python
+from clip_cli.modules.dataset import create_train_val_dataloaders
+
+# Default: sample captions during training, average during evaluation
+train_loader, val_loader = create_train_val_dataloaders(
+    data_path="data",
+    sample_caption_train=True,
+    sample_caption_val=False,
+)
+
+# Custom: sample captions for both training and validation
+train_loader, val_loader = create_train_val_dataloaders(
+    data_path="data",
+    sample_caption_train=True,
+    sample_caption_val=True,
+)
+```
+
+### CSV Format (Single Caption)
+
+For datasets with single caption per image:
 
 ```csv
 image,text
