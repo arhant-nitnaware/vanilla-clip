@@ -58,14 +58,29 @@ class CLIPTrainer:
             for param in self.model.transformer.parameters():
                 param.requires_grad = False
         
+        # Ensure logit scale is always trainable
+        if hasattr(self.model, 'logit_scale'):
+            self.model.logit_scale.requires_grad = True
+        
+        # Ensure projection heads are trainable if they exist
+        if hasattr(self.model, 'visual_projection'):
+            for param in self.model.visual_projection.parameters():
+                param.requires_grad = True
+        if hasattr(self.model, 'text_projection'):
+            for param in self.model.text_projection.parameters():
+                param.requires_grad = True
+        
+        # Check if there are any trainable parameters
+        has_trainable_params = any(p.requires_grad for p in self.model.parameters())
+        
         # Optimizer setup
-        self.optimizer = self._setup_optimizer()
+        self.optimizer = self._setup_optimizer() if has_trainable_params else None
         
         # Scheduler setup
-        self.scheduler = self._setup_scheduler()
+        self.scheduler = self._setup_scheduler() if has_trainable_params else None
         
-        # Mixed precision
-        self.scaler = GradScaler() if self.config.mixed_precision else None
+        # Mixed precision (only if there are trainable parameters)
+        self.scaler = GradScaler() if (self.config.mixed_precision and has_trainable_params) else None
         
         # Training state
         self.current_epoch = 0
@@ -166,7 +181,7 @@ class CLIPTrainer:
             texts = clip.tokenize(batch["text"], truncate=True).to(self.device)
             
             # Forward pass with mixed precision
-            if self.scaler:
+            if self.scaler and self.optimizer:
                 with autocast():
                     image_features = self.model.encode_image(images)
                     text_features = self.model.encode_text(texts)
@@ -197,8 +212,9 @@ class CLIPTrainer:
                 if (batch_idx + 1) % self.config.accumulation_steps == 0:
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
-                    self.scheduler.step()
-            else:
+                    if self.scheduler:
+                        self.scheduler.step()
+            elif self.optimizer:
                 image_features = self.model.encode_image(images)
                 text_features = self.model.encode_text(texts)
                 
@@ -226,7 +242,22 @@ class CLIPTrainer:
                 # Gradient accumulation
                 if (batch_idx + 1) % self.config.accumulation_steps == 0:
                     self.optimizer.step()
-                    self.scheduler.step()
+                    if self.scheduler:
+                        self.scheduler.step()
+            else:
+                # No trainable parameters - just compute loss for logging
+                image_features = self.model.encode_image(images)
+                text_features = self.model.encode_text(texts)
+                
+                # Normalize features
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                
+                loss = self.clip_loss(
+                    image_features,
+                    text_features,
+                    self.model.logit_scale.exp(),
+                )
             
             total_loss += loss.item()
             num_batches += 1
@@ -235,7 +266,7 @@ class CLIPTrainer:
             # Logging
             if self.global_step % self.config.log_interval == 0:
                 avg_loss = total_loss / num_batches
-                lr = self.optimizer.param_groups[0]["lr"]
+                lr = self.optimizer.param_groups[0]["lr"] if self.optimizer else 0.0
                 
                 if self.logger:
                     self.logger.log_metric("train/loss", avg_loss, step=self.global_step)
