@@ -6,6 +6,7 @@ Supports mixed precision, gradient accumulation, learning rate scheduling, and c
 import clip
 import torch
 import torch.nn.functional as F
+import numpy as np
 from torch.optim import AdamW, Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.cuda.amp import GradScaler, autocast
@@ -75,6 +76,23 @@ class CLIPTrainer:
         # Check if there are any trainable parameters
         has_trainable_params = any(p.requires_grad for p in self.model.parameters())
         
+        # Log trainable parameters
+        trainable_count = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total_count = sum(p.numel() for p in self.model.parameters())
+        print(f"Trainable parameters: {trainable_count:,} / {total_count:,} ({100*trainable_count/total_count:.2f}%)")
+        
+        # List trainable components
+        if hasattr(self.model, 'visual') and any(p.requires_grad for p in self.model.visual.parameters()):
+            print("  - Vision encoder: trainable")
+        if hasattr(self.model, 'transformer') and any(p.requires_grad for p in self.model.transformer.parameters()):
+            print("  - Text encoder: trainable")
+        if hasattr(self.model, 'visual_projection') and self.model.visual_projection.requires_grad:
+            print("  - Image projection: trainable")
+        if hasattr(self.model, 'text_projection') and self.model.text_projection.requires_grad:
+            print("  - Text projection: trainable")
+        if hasattr(self.model, 'logit_scale') and self.model.logit_scale.requires_grad:
+            print("  - Logit scale: trainable")
+        
         # Check model dtype - disable mixed precision if model is already in FP16
         model_dtype = next(self.model.parameters()).dtype
         use_mixed_precision = self.config.mixed_precision and model_dtype == torch.float32
@@ -95,6 +113,10 @@ class CLIPTrainer:
             print("Using mixed precision training")
         else:
             print(f"Not using mixed precision (config: {self.config.mixed_precision}, dtype: {model_dtype}, trainable: {has_trainable_params})")
+        
+        if not has_trainable_params:
+            print("WARNING: No trainable parameters found! Model will not be trained.")
+            print("Set train_vision_encoder, train_text_encoder, train_image_projection, train_text_projection, or train_logit_scale to true in config.")
         
         # Training state
         self.current_epoch = 0
@@ -277,6 +299,15 @@ class CLIPTrainer:
             num_batches += 1
             self.global_step += 1
             
+            # Check for NaN loss
+            if torch.isnan(loss):
+                print(f"WARNING: NaN loss detected at step {self.global_step}")
+                print(f"Image features: min={image_features.min():.4f}, max={image_features.max():.4f}, mean={image_features.mean():.4f}")
+                print(f"Text features: min={text_features.min():.4f}, max={text_features.max():.4f}, mean={text_features.mean():.4f}")
+                print(f"Logit scale: {self.model.logit_scale.exp().item():.4f}")
+                # Skip this batch
+                continue
+            
             # Logging
             if self.global_step % self.config.log_interval == 0:
                 avg_loss = total_loss / num_batches
@@ -292,6 +323,13 @@ class CLIPTrainer:
                 })
         
         avg_loss = total_loss / num_batches
+        
+        # Check for NaN average loss
+        if np.isnan(avg_loss):
+            print(f"WARNING: Average loss is NaN after epoch {self.current_epoch + 1}")
+            print(f"Total loss: {total_loss}, Num batches: {num_batches}")
+            avg_loss = 0.0  # Set to 0 to avoid NaN in logs
+        
         self.train_losses.append(avg_loss)
         
         return {"loss": avg_loss}
