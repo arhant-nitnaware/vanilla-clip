@@ -61,20 +61,63 @@ class CLIPTrainer:
             for param in self.model.transformer.parameters():
                 param.requires_grad = False
         
-        # Logit scale
-        if hasattr(self.model, 'logit_scale'):
-            self.model.logit_scale.requires_grad = self.config.train_logit_scale
-        
         # Image projection
         if hasattr(self.model, 'visual_projection'):
             self.model.visual_projection.requires_grad = self.config.train_image_projection
+            # Re-initialize image projection if it's trainable to ensure proper weights
+            if self.config.train_image_projection:
+                torch.nn.init.xavier_uniform_(self.model.visual_projection)
         
         # Text projection
         if hasattr(self.model, 'text_projection'):
             self.model.text_projection.requires_grad = self.config.train_text_projection
+            # Re-initialize text projection if it's trainable to ensure proper weights
+            if self.config.train_text_projection:
+                torch.nn.init.xavier_uniform_(self.model.text_projection)
+        
+        # Logit scale - initialize to a reasonable value if trainable
+        if hasattr(self.model, 'logit_scale'):
+            self.model.logit_scale.requires_grad = self.config.train_logit_scale
+            if self.config.train_logit_scale:
+                # Initialize logit scale to log(1/0.07) ≈ 2.66 (standard CLIP initialization)
+                self.model.logit_scale.data = torch.tensor(np.log(1 / 0.07)).to(self.device)
         
         # Check if there are any trainable parameters
         has_trainable_params = any(p.requires_grad for p in self.model.parameters())
+        
+        # Check for NaN in model parameters
+        has_nan = any(torch.isnan(p).any() for p in self.model.parameters())
+        if has_nan:
+            print("WARNING: Model contains NaN parameters. Re-initializing trainable parameters.")
+            # Re-initialize trainable parameters
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    if 'logit_scale' in name:
+                        param.data = torch.tensor(np.log(1 / 0.07)).to(self.device)
+                    elif 'projection' in name:
+                        torch.nn.init.xavier_uniform_(param)
+        
+        # Test forward pass to check for NaN outputs
+        self.model.eval()
+        with torch.no_grad():
+            test_text = clip.tokenize(["a test sentence"]).to(self.device)
+            test_text_features = self.model.encode_text(test_text)
+            if torch.isnan(test_text_features).any():
+                print("WARNING: Text encoder produces NaN outputs. This may indicate a corrupted model.")
+                print("Consider re-downloading the model or checking the model file.")
+            else:
+                print("Text encoder test: OK")
+            
+            # Test logit scale
+            if hasattr(self.model, 'logit_scale'):
+                logit_scale_val = self.model.logit_scale.exp().item()
+                if np.isnan(logit_scale_val) or np.isinf(logit_scale_val):
+                    print(f"WARNING: Logit scale is NaN/Inf: {logit_scale_val}. Re-initializing.")
+                    self.model.logit_scale.data = torch.tensor(np.log(1 / 0.07)).to(self.device)
+                else:
+                    print(f"Logit scale: {logit_scale_val:.4f}")
+        
+        self.model.train()
         
         # Log trainable parameters
         trainable_count = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
