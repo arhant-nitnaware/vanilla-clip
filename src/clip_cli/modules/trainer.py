@@ -49,26 +49,28 @@ class CLIPTrainer:
         
         self.model.to(self.device)
         
-        # Freeze encoders if specified
-        if self.model_config.freeze_image_encoder:
+        # Granular training control
+        # Vision encoder
+        if not self.config.train_vision_encoder:
             for param in self.model.visual.parameters():
                 param.requires_grad = False
         
-        if self.model_config.freeze_text_encoder:
+        # Text encoder
+        if not self.config.train_text_encoder:
             for param in self.model.transformer.parameters():
                 param.requires_grad = False
         
-        # Ensure logit scale is always trainable
+        # Logit scale
         if hasattr(self.model, 'logit_scale'):
-            self.model.logit_scale.requires_grad = True
+            self.model.logit_scale.requires_grad = self.config.train_logit_scale
         
-        # Ensure projection heads are trainable if they exist
+        # Image projection
         if hasattr(self.model, 'visual_projection'):
-            for param in self.model.visual_projection.parameters():
-                param.requires_grad = True
+            self.model.visual_projection.requires_grad = self.config.train_image_projection
+        
+        # Text projection
         if hasattr(self.model, 'text_projection'):
-            for param in self.model.text_projection.parameters():
-                param.requires_grad = True
+            self.model.text_projection.requires_grad = self.config.train_text_projection
         
         # Check if there are any trainable parameters
         has_trainable_params = any(p.requires_grad for p in self.model.parameters())

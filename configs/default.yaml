@@ -11,8 +11,6 @@ experiment:
 model:
   name: ViT-B-32
   pretrained: true
-  freeze_image_encoder: true
-  freeze_text_encoder: true
   checkpoint_path: null
 
 data:
@@ -39,6 +37,13 @@ training:
   optimizer: adamw
   scheduler: cosine
   mixed_precision: true
+  
+  # Granular training control
+  train_vision_encoder: false
+  train_text_encoder: false
+  train_image_projection: true
+  train_text_projection: true
+  train_logit_scale: true
 
 evaluation:
   batch_size: 64

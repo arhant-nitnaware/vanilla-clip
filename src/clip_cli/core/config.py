@@ -16,8 +16,6 @@ class ModelConfig:
     """Model configuration"""
     name: str = "ViT-B-32"
     pretrained: bool = True
-    freeze_image_encoder: bool = False
-    freeze_text_encoder: bool = False
     checkpoint_path: Optional[str] = None
 
 
@@ -50,6 +48,13 @@ class TrainingConfig:
     optimizer: str = "adamw"
     scheduler: str = "cosine"
     mixed_precision: bool = True
+    
+    # Granular training control
+    train_vision_encoder: bool = True
+    train_text_encoder: bool = True
+    train_image_projection: bool = True
+    train_text_projection: bool = True
+    train_logit_scale: bool = True
 
 
 @dataclass
