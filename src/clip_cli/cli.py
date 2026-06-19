@@ -1,5 +1,5 @@
 """
-Main CLI for Research-grade CLIP Framework
+Main CLI for CLIP Framework
 """
 import warnings
 warnings.filterwarnings(
@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clip-cli",
         description="""
-Research-grade OpenAI CLIP Framework
+OpenAI CLIP Framework
 ==================================
 Offline-first architecture with experiment tracking, checkpoint management,
 and comprehensive evaluation metrics.

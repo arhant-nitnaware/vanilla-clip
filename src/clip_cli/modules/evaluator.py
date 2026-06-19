@@ -1,5 +1,5 @@
 """
-Research-grade evaluation module for CLIP
+evaluation module for CLIP
 Supports comprehensive metrics including recall, precision, MRR, and mean rank
 """
 

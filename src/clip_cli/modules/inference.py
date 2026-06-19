@@ -1,5 +1,5 @@
 """
-Research-grade inference module for CLIP
+inference module for CLIP
 Supports image-text similarity, zero-shot classification, and retrieval
 """
 

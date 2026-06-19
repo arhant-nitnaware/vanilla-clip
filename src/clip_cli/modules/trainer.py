@@ -1,5 +1,5 @@
 """
-Research-grade training module for CLIP
+training module for CLIP
 Supports mixed precision, gradient accumulation, learning rate scheduling, and comprehensive logging
 """
 
@@ -20,7 +20,7 @@ from ..core.checkpoint import CheckpointManager
 
 
 class CLIPTrainer:
-    """Research-grade CLIP trainer with advanced features"""
+    """CLIP trainer with advanced features"""
     
     def __init__(
         self,

@@ -1,13 +1,13 @@
-# Research-Grade OpenAI CLIP Framework
+# OpenAI CLIP Framework
 
-A comprehensive, offline-first implementation of OpenAI's CLIP (Contrastive Language-Image Pre-training) designed for research experimentation. Features include experiment tracking, checkpoint management, mixed precision training, and comprehensive evaluation metrics.
+A comprehensive, offline-first implementation of OpenAI's CLIP (Contrastive Language-Image Pre-training) designed for experimentation. Features include experiment tracking, checkpoint management, mixed precision training, and comprehensive evaluation metrics.
 
 ## Features
 
 - **Offline-First Architecture**: Models are cached locally with online fallback
 - **Experiment Tracking**: Integrated TensorBoard and WandB support
 - **Checkpoint Management**: Automatic versioning with best model tracking
-- **Research-Grade Training**: Mixed precision, gradient accumulation, learning rate scheduling
+- **Training**: Mixed precision, gradient accumulation, learning rate scheduling
 - **Comprehensive Evaluation**: Recall@K, Precision@K, MRR, Mean Rank metrics
 - **Flexible Inference**: Image-text similarity, zero-shot classification, retrieval
 - **Configuration Management**: YAML-based experiment configurations
@@ -506,7 +506,7 @@ logger = ExperimentLogger(
     log_dir="experiments/logs",
     use_tensorboard=True,
     use_wandb=True,
-    wandb_project="clip-research",
+    wandb_project="clip-exp",
     wandb_entity="your-username",
 )
 ```
@@ -654,26 +654,3 @@ openAI-CLIP/
 - Check internet connection
 - Use `--offline` mode if model is already cached
 - Manually download model from OpenAI CDN and place in `cache/models/`
-
-## Citation
-
-If you use this framework in your research, please cite:
-
-```bibtex
-@software{clip_cli_research,
-  title={Research-Grade OpenAI CLIP Framework},
-  author={Research Team},
-  year={2024},
-  url={https://github.com/your-repo/openAI-CLIP}
-}
-```
-
-## License
-
-MIT License
-
-## Acknowledgments
-
-- OpenAI for the original CLIP model and implementation
-- PyTorch team for the deep learning framework
-- Hugging Face for various utilities
