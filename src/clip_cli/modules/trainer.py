@@ -75,14 +75,26 @@ class CLIPTrainer:
         # Check if there are any trainable parameters
         has_trainable_params = any(p.requires_grad for p in self.model.parameters())
         
+        # Check model dtype - disable mixed precision if model is already in FP16
+        model_dtype = next(self.model.parameters()).dtype
+        use_mixed_precision = self.config.mixed_precision and model_dtype == torch.float32
+        
+        if not use_mixed_precision and self.config.mixed_precision:
+            print(f"Model dtype is {model_dtype}, disabling mixed precision")
+        
         # Optimizer setup
         self.optimizer = self._setup_optimizer() if has_trainable_params else None
         
         # Scheduler setup
         self.scheduler = self._setup_scheduler() if has_trainable_params else None
         
-        # Mixed precision (only if there are trainable parameters)
-        self.scaler = GradScaler() if (self.config.mixed_precision and has_trainable_params) else None
+        # Mixed precision (only if there are trainable parameters and model is FP32)
+        self.scaler = None
+        if use_mixed_precision and has_trainable_params:
+            self.scaler = GradScaler()
+            print("Using mixed precision training")
+        else:
+            print(f"Not using mixed precision (config: {self.config.mixed_precision}, dtype: {model_dtype}, trainable: {has_trainable_params})")
         
         # Training state
         self.current_epoch = 0

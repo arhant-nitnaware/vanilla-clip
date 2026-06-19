@@ -36,7 +36,7 @@ training:
   early_stopping_patience: 5
   optimizer: adamw
   scheduler: cosine
-  mixed_precision: true
+  mixed_precision: false
   
   # Granular training control
   train_vision_encoder: false
