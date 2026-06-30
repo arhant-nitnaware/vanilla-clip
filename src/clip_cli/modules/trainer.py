@@ -49,6 +49,18 @@ class CLIPTrainer:
             self.device = torch.device(device)
         
         self.model.to(self.device)
+        # Ensure model is in float32 for training stability (necessary since clip.load defaults to float16 on CUDA)
+        self.model.float()
+        
+        # Get image projection parameter(s)/module
+        image_projection_params = []
+        if hasattr(self.model, 'visual'):
+            if hasattr(self.model.visual, 'proj') and self.model.visual.proj is not None:
+                # ViT: proj is a Parameter
+                image_projection_params = [self.model.visual.proj]
+            elif hasattr(self.model.visual, 'attnpool') and hasattr(self.model.visual.attnpool, 'c_proj'):
+                # ResNet: attnpool.c_proj is a Linear module
+                image_projection_params = list(self.model.visual.attnpool.c_proj.parameters())
         
         # Granular training control
         # Vision encoder
@@ -56,29 +68,48 @@ class CLIPTrainer:
             for param in self.model.visual.parameters():
                 param.requires_grad = False
         
+        # Image projection
+        if image_projection_params:
+            for param in image_projection_params:
+                param.requires_grad = self.config.train_image_projection
+            
+            # Re-initialize only if explicitly training from scratch (not pretrained)
+            if self.config.train_image_projection and not self.model_config.pretrained:
+                for param in image_projection_params:
+                    if param.dim() > 1:
+                        torch.nn.init.xavier_uniform_(param)
+                    else:
+                        torch.nn.init.zeros_(param)
+        
         # Text encoder
         if not self.config.train_text_encoder:
-            for param in self.model.transformer.parameters():
-                param.requires_grad = False
-        
-        # Image projection
-        if hasattr(self.model, 'visual_projection'):
-            self.model.visual_projection.requires_grad = self.config.train_image_projection
-            # Re-initialize image projection if it's trainable to ensure proper weights
-            if self.config.train_image_projection:
-                torch.nn.init.xavier_uniform_(self.model.visual_projection)
+            # Freeze transformer blocks
+            if hasattr(self.model, 'transformer'):
+                for param in self.model.transformer.parameters():
+                    param.requires_grad = False
+            # Freeze token embeddings
+            if hasattr(self.model, 'token_embedding'):
+                for param in self.model.token_embedding.parameters():
+                    param.requires_grad = False
+            # Freeze positional embeddings
+            if hasattr(self.model, 'positional_embedding') and self.model.positional_embedding is not None:
+                self.model.positional_embedding.requires_grad = False
+            # Freeze final layer norm
+            if hasattr(self.model, 'ln_final'):
+                for param in self.model.ln_final.parameters():
+                    param.requires_grad = False
         
         # Text projection
-        if hasattr(self.model, 'text_projection'):
+        if hasattr(self.model, 'text_projection') and self.model.text_projection is not None:
             self.model.text_projection.requires_grad = self.config.train_text_projection
-            # Re-initialize text projection if it's trainable to ensure proper weights
-            if self.config.train_text_projection:
+            # Re-initialize text projection if it's trainable and not pretrained
+            if self.config.train_text_projection and not self.model_config.pretrained:
                 torch.nn.init.xavier_uniform_(self.model.text_projection)
         
         # Logit scale - initialize to a reasonable value if trainable
-        if hasattr(self.model, 'logit_scale'):
+        if hasattr(self.model, 'logit_scale') and self.model.logit_scale is not None:
             self.model.logit_scale.requires_grad = self.config.train_logit_scale
-            if self.config.train_logit_scale:
+            if self.config.train_logit_scale and not self.model_config.pretrained:
                 # Initialize logit scale to log(1/0.07) ≈ 2.66 (standard CLIP initialization)
                 self.model.logit_scale.data = torch.tensor(np.log(1 / 0.07)).to(self.device)
         
@@ -94,8 +125,11 @@ class CLIPTrainer:
                 if param.requires_grad:
                     if 'logit_scale' in name:
                         param.data = torch.tensor(np.log(1 / 0.07)).to(self.device)
-                    elif 'projection' in name:
-                        torch.nn.init.xavier_uniform_(param)
+                    elif 'proj' in name:
+                        if param.dim() > 1:
+                            torch.nn.init.xavier_uniform_(param)
+                        else:
+                            torch.nn.init.zeros_(param)
         
         # Test forward pass to check for NaN outputs
         self.model.eval()
@@ -109,7 +143,7 @@ class CLIPTrainer:
                 print("Text encoder test: OK")
             
             # Test logit scale
-            if hasattr(self.model, 'logit_scale'):
+            if hasattr(self.model, 'logit_scale') and self.model.logit_scale is not None:
                 logit_scale_val = self.model.logit_scale.exp().item()
                 if np.isnan(logit_scale_val) or np.isinf(logit_scale_val):
                     print(f"WARNING: Logit scale is NaN/Inf: {logit_scale_val}. Re-initializing.")
@@ -119,21 +153,26 @@ class CLIPTrainer:
         
         self.model.train()
         
-        # Log trainable parameters
+        # Log trainable parameters with dtype and count
+        print("\n=== Trainable Parameters ===")
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                print(f"{name}: dtype={param.dtype}, shape={tuple(param.shape)}, count={param.numel():,}")
         trainable_count = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         total_count = sum(p.numel() for p in self.model.parameters())
-        print(f"Trainable parameters: {trainable_count:,} / {total_count:,} ({100*trainable_count/total_count:.2f}%)")
+        print(f"Total trainable: {trainable_count:,} / {total_count:,} ({100*trainable_count/total_count:.2f}%)")
+        print("=" * 30 + "\n")
         
         # List trainable components
-        if hasattr(self.model, 'visual') and any(p.requires_grad for p in self.model.visual.parameters()):
+        if hasattr(self.model, 'visual') and any(p.requires_grad for p in self.model.visual.parameters() if not any(p is proj_p for proj_p in image_projection_params)):
             print("  - Vision encoder: trainable")
         if hasattr(self.model, 'transformer') and any(p.requires_grad for p in self.model.transformer.parameters()):
             print("  - Text encoder: trainable")
-        if hasattr(self.model, 'visual_projection') and self.model.visual_projection.requires_grad:
+        if image_projection_params and any(p.requires_grad for p in image_projection_params):
             print("  - Image projection: trainable")
-        if hasattr(self.model, 'text_projection') and self.model.text_projection.requires_grad:
+        if hasattr(self.model, 'text_projection') and self.model.text_projection is not None and self.model.text_projection.requires_grad:
             print("  - Text projection: trainable")
-        if hasattr(self.model, 'logit_scale') and self.model.logit_scale.requires_grad:
+        if hasattr(self.model, 'logit_scale') and self.model.logit_scale is not None and self.model.logit_scale.requires_grad:
             print("  - Logit scale: trainable")
         
         # Check model dtype - disable mixed precision if model is already in FP16
@@ -161,6 +200,9 @@ class CLIPTrainer:
             print("WARNING: No trainable parameters found! Model will not be trained.")
             print("Set train_vision_encoder, train_text_encoder, train_image_projection, train_text_projection, or train_logit_scale to true in config.")
         
+        # Enable anomaly detection for debugging
+        torch.autograd.set_detect_anomaly(True)
+        
         # Training state
         self.current_epoch = 0
         self.global_step = 0
@@ -171,21 +213,30 @@ class CLIPTrainer:
         self.val_losses = []
     
     def _setup_optimizer(self):
-        """Setup optimizer"""
-        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        """Setup optimizer with logit_scale excluded from weight decay"""
+        # Separate parameters for weight decay
+        decay_params = []
+        no_decay_params = []
+        
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                if 'logit_scale' in name:
+                    no_decay_params.append(param)
+                else:
+                    decay_params.append(param)
+        
+        print(f"Optimizer: {len(decay_params)} params with weight decay, {len(no_decay_params)} without")
         
         if self.config.optimizer.lower() == "adamw":
-            optimizer = AdamW(
-                trainable_params,
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-            )
+            optimizer = AdamW([
+                {'params': decay_params, 'weight_decay': self.config.weight_decay},
+                {'params': no_decay_params, 'weight_decay': 0.0}
+            ], lr=self.config.learning_rate)
         elif self.config.optimizer.lower() == "adam":
-            optimizer = Adam(
-                trainable_params,
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-            )
+            optimizer = Adam([
+                {'params': decay_params, 'weight_decay': self.config.weight_decay},
+                {'params': no_decay_params, 'weight_decay': 0.0}
+            ], lr=self.config.learning_rate)
         else:
             raise ValueError(f"Unknown optimizer: {self.config.optimizer}")
         
@@ -259,11 +310,32 @@ class CLIPTrainer:
             images = batch["image"].to(self.device)
             texts = clip.tokenize(batch["text"], truncate=True).to(self.device)
             
+            # Log first batch completely
+            if batch_idx == 0:
+                print("\n=== First Batch Diagnostics ===")
+                print(f"Captions: {batch['text'][:2]}")
+                print(f"Tokens shape: {texts.shape}, dtype: {texts.dtype}")
+                print(f"Tokens min/max: {texts.min()}/{texts.max()}")
+                if hasattr(self.model, 'logit_scale'):
+                    print(f"Logit scale (raw): {self.model.logit_scale.item():.4f}")
+                    print(f"Logit scale (exp): {self.model.logit_scale.exp().item():.4f}")
+                if hasattr(self.model, 'text_projection'):
+                    print(f"Text projection: dtype={self.model.text_projection.dtype}, shape={self.model.text_projection.shape}")
+                    print(f"Text projection stats: min={self.model.text_projection.min():.4f}, max={self.model.text_projection.max():.4f}, mean={self.model.text_projection.mean():.4f}")
+                print("=" * 30 + "\n")
+            
             # Forward pass with mixed precision
             if self.scaler and self.optimizer:
                 with autocast():
                     image_features = self.model.encode_image(images)
                     text_features = self.model.encode_text(texts)
+                    
+                    # Check text features before normalization
+                    if batch_idx == 0:
+                        print(f"Text features (raw): min={text_features.min():.4f}, max={text_features.max():.4f}, mean={text_features.mean():.4f}")
+                        print(f"Text features norm: {text_features.norm(dim=-1).mean():.4f}")
+                        if torch.isnan(text_features).any():
+                            print("ERROR: Text features contain NaN after encode_text()")
                     
                     # Normalize features
                     image_features = image_features / image_features.norm(dim=-1, keepdim=True)
@@ -275,9 +347,21 @@ class CLIPTrainer:
                         self.model.logit_scale.exp(),
                     )
                 
+                # Check loss before backward
+                if batch_idx == 0:
+                    print(f"Loss before backward: {loss.item():.4f}")
+                
                 # Backward pass with gradient scaling
                 self.optimizer.zero_grad()
                 self.scaler.scale(loss).backward()
+                
+                # Check gradients after backward
+                if batch_idx == 0:
+                    for name, param in self.model.named_parameters():
+                        if param.requires_grad and param.grad is not None:
+                            if torch.isnan(param.grad).any():
+                                print(f"ERROR: NaN gradient in {name}")
+                                break
                 
                 # Gradient clipping
                 if self.config.gradient_clip > 0:
@@ -293,9 +377,26 @@ class CLIPTrainer:
                     self.scaler.update()
                     if self.scheduler:
                         self.scheduler.step()
+                    
+                    # Check parameters after optimizer step
+                    if batch_idx == 0:
+                        for name, param in self.model.named_parameters():
+                            if param.requires_grad:
+                                if torch.isnan(param).any():
+                                    print(f"ERROR: NaN parameter after optimizer step in {name}")
+                                    break
+                        if hasattr(self.model, 'logit_scale'):
+                            print(f"Logit scale after step: {self.model.logit_scale.exp().item():.4f}")
             elif self.optimizer:
                 image_features = self.model.encode_image(images)
                 text_features = self.model.encode_text(texts)
+                
+                # Check text features before normalization
+                if batch_idx == 0:
+                    print(f"Text features (raw): min={text_features.min():.4f}, max={text_features.max():.4f}, mean={text_features.mean():.4f}")
+                    print(f"Text features norm: {text_features.norm(dim=-1).mean():.4f}")
+                    if torch.isnan(text_features).any():
+                        print("ERROR: Text features contain NaN after encode_text()")
                 
                 # Normalize features
                 image_features = image_features / image_features.norm(dim=-1, keepdim=True)
@@ -307,9 +408,21 @@ class CLIPTrainer:
                     self.model.logit_scale.exp(),
                 )
                 
+                # Check loss before backward
+                if batch_idx == 0:
+                    print(f"Loss before backward: {loss.item():.4f}")
+                
                 # Backward pass
                 self.optimizer.zero_grad()
                 loss.backward()
+                
+                # Check gradients after backward
+                if batch_idx == 0:
+                    for name, param in self.model.named_parameters():
+                        if param.requires_grad and param.grad is not None:
+                            if torch.isnan(param.grad).any():
+                                print(f"ERROR: NaN gradient in {name}")
+                                break
                 
                 # Gradient clipping
                 if self.config.gradient_clip > 0:
@@ -323,10 +436,27 @@ class CLIPTrainer:
                     self.optimizer.step()
                     if self.scheduler:
                         self.scheduler.step()
+                    
+                    # Check parameters after optimizer step
+                    if batch_idx == 0:
+                        for name, param in self.model.named_parameters():
+                            if param.requires_grad:
+                                if torch.isnan(param).any():
+                                    print(f"ERROR: NaN parameter after optimizer step in {name}")
+                                    break
+                        if hasattr(self.model, 'logit_scale'):
+                            print(f"Logit scale after step: {self.model.logit_scale.exp().item():.4f}")
             else:
                 # No trainable parameters - just compute loss for logging
                 image_features = self.model.encode_image(images)
                 text_features = self.model.encode_text(texts)
+                
+                # Check text features before normalization
+                if batch_idx == 0:
+                    print(f"Text features (raw): min={text_features.min():.4f}, max={text_features.max():.4f}, mean={text_features.mean():.4f}")
+                    print(f"Text features norm: {text_features.norm(dim=-1).mean():.4f}")
+                    if torch.isnan(text_features).any():
+                        print("ERROR: Text features contain NaN after encode_text()")
                 
                 # Normalize features
                 image_features = image_features / image_features.norm(dim=-1, keepdim=True)

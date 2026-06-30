@@ -1,0 +1,53 @@
+# Lightweight CPU Test CLIP Training Configuration
+
+experiment:
+  name: cpu_test
+  description: "Lightweight CPU training test"
+  seed: 42
+  device: auto
+  distributed: false
+  world_size: 1
+
+model:
+  name: ViT-B-32
+  pretrained: true
+  checkpoint_path: null
+
+data:
+  dataset_path: NWPU-Captions-mini
+  batch_size: 2
+  num_workers: 0
+  pin_memory: false
+  image_size: 224
+  train_split: train
+  val_split: val
+  test_split: test
+
+training:
+  epochs: 1
+  learning_rate: 1.0e-05
+  weight_decay: 0.01
+  warmup_epochs: 0
+  gradient_clip: 1.0
+  accumulation_steps: 1
+  log_interval: 1
+  eval_interval: 1
+  save_interval: 1
+  early_stopping_patience: 1
+  optimizer: adamw
+  scheduler: cosine
+  mixed_precision: false
+  
+  # Granular training control
+  train_vision_encoder: false
+  train_text_encoder: false
+  train_image_projection: true
+  train_text_projection: true
+  train_logit_scale: true
+
+evaluation:
+  batch_size: 2
+  num_workers: 0
+  metrics:
+    - recall@1
+    - precision@1
